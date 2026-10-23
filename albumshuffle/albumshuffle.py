@@ -1,4 +1,4 @@
-"""Continuous Album Shuffle for Rhythmbox 3.5.x (experimental)."""
+"""Continuous Album Shuffle for Rhythmbox 3.5.x."""
 import logging
 import random
 from collections import defaultdict, deque
@@ -138,6 +138,31 @@ class ContinuousAlbumShuffle(GObject.Object, Peas.Activatable):
             return None
         return page
 
+    def _get_or_create_playlist(self, manager):
+        """Reuse our generated playlist instead of creating another every run.
+
+        Resolve the saved playlist by name after a Rhythmbox restart, too.
+        Don't remove unrelated playlists or alter the music library.
+        """
+        if self.playlist is not None:
+            return self.playlist
+        for candidate in manager.get_playlists():
+            if (isinstance(candidate, RB.StaticPlaylistSource) and
+                    candidate.props.name == PLAYLIST_NAME):
+                self.playlist = candidate
+                return candidate
+        self.playlist = manager.new_playlist(PLAYLIST_NAME, False)
+        return self.playlist
+
+    def _clear_generated_playlist(self, playlist):
+        """Remove entries only from the plugin's own playlist."""
+        model = playlist.get_query_model()
+        if model is None:
+            return
+        # Snapshot first; removing entries modifies the query model.
+        for entry in [row[0] for row in model]:
+            playlist.remove_entry(entry)
+
     def on_start(self, *_args):
         try:
             shell = self.object
@@ -178,8 +203,12 @@ class ContinuousAlbumShuffle(GObject.Object, Peas.Activatable):
             self.completed_count = 0
             self.active = False
 
+            # Playback must stop before we replace tracks in the playlist
+            # that might currently be feeding the player.
+            self.player.set_playback_state(False, False)
             manager = shell.props.playlist_manager
-            self.playlist = manager.new_playlist(PLAYLIST_NAME, False)
+            self.playlist = self._get_or_create_playlist(manager)
+            self._clear_generated_playlist(self.playlist)
             LOG.warning('Album Shuffle selection after playlist creation: %s',
                         getattr(shell.props.selected_page.props, 'name', '?')
                         if shell.props.selected_page is not None else '(none)')
