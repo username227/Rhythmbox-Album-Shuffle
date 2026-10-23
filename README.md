@@ -15,7 +15,8 @@ This is a plugin for Rhythmbox. It will add the option to shuffle by albums to R
 - The plugin preserves the current library view and filters while playing.
 
 # Installation
-Install the <i>albumshuffle</i> folder to either <code> /usr/lib/rhythmbox/plugins</code> or <code> ~/.local/share/rhythmbox/plugins</code>. For the flatpak version, install into <code>~/.var/app/org.gnome.Rhythmbox3/data/rhythmbox/plugins</code>
+Install the albumshuffle folder into either `/usr/lib/rhythmbox/plugins` or `~/.local/share/rhythmbox/plugins`.
+For the Flatpak version, install it into `~/.var/app/org.gnome.Rhythmbox3/data/rhythmbox/plugins`.
 
 # Full Disclosure
   I am not a developer and am not formally trained in computer programming. AI was used to assist in the writing of the code based on my specifications, testing, and feedback. I have tested various development versions on  Arch Linux with Rhythmbox 3.5.1. I have not tested the plugin on other distributions. Review and improving of the code base, as well as additional feature requests, are welcome.
