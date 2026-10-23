@@ -18,7 +18,7 @@ This is a plugin for Rhythmbox. It will add the option to shuffle by albums to R
 Install the <i>albumshuffle</i> folder to either <code> /usr/lib/rhythmbox/plugins</code> or <code> ~/.local/share/rhythmbox/plugins</code>. For the flatpak version, install into <code>~/.var/app/org.gnome.Rhythmbox3/data/rhythmbox/plugins</code>
 
 # Full Disclosure
-  I am not a developer and am not formally trained in computer programming. AI was used to assist in the writing of the code based on my specifications, testing, and feedback. I have tested various development versions on  Arch Linux with Rhythmbox 3.5.1.. I have not tested the plugin on other distributions. Review and improving of the code base, as well as additional feature requests, are welcome.
+  I am not a developer and am not formally trained in computer programming. AI was used to assist in the writing of the code based on my specifications, testing, and feedback. I have tested various development versions on  Arch Linux with Rhythmbox 3.5.1. I have not tested the plugin on other distributions. Review and improving of the code base, as well as additional feature requests, are welcome.
 
 ## Please Note
   The plugin is python-based. The issues regarding the breaking of the python-based Rhythmbox plugins was well known, and they were broken in the past for a significant amount of time. Those upstream issues appear to have been rectified now. However, future changes of  Rhythmbox or its dependencies could cause changes that affect this plugin, particularly if those changes break python-loader. Hopefully this will not happen, but if it does, this plugin could break.
