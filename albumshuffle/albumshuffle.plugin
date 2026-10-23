@@ -1,0 +1,8 @@
+[Plugin]
+Loader=python3
+Module=albumshuffle
+IAge=2
+Name=Continuous Album Shuffle
+Description=Random complete albums from the currently filtered music view, with a one-click shuffle button.
+Authors=Community plugin draft
+Copyright=Copyright 2026
