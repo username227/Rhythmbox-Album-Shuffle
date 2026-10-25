@@ -3,7 +3,7 @@ import logging
 import random
 from collections import defaultdict, deque
 
-from gi.repository import GObject, Gio, GLib, Gtk, Peas, RB
+from gi.repository import GObject, Gio, GLib, Gtk, Gdk, GdkPixbuf, Peas, RB
 
 LOG = logging.getLogger('rhythmbox-album-shuffle')
 PLAYLIST_NAME = 'Continuous Album Shuffle'
@@ -11,16 +11,18 @@ BATCH_ALBUMS = 12
 
 
 def group_albums(entries):
-    """Group by album artist + album, order tracks by disc/track numbers."""
+    """Group by album title and optional album artist; sort by disc/track."""
     grouped = defaultdict(list)
     for entry in entries:
         album = (entry.get_string(RB.RhythmDBPropType.ALBUM) or '').strip()
         if not album or album.lower() in ('unknown', 'unknown album'):
             continue
-        artist = (entry.get_string(RB.RhythmDBPropType.ALBUM_ARTIST) or
-                  entry.get_string(RB.RhythmDBPropType.ARTIST) or '').strip()
-        # Album-artist + title avoids merging identically named albums of different artists.
-        key = (artist.casefold(), album.casefold())
+        # Never fall back to the individual track artist. Compilation albums
+        # commonly contain different artists while having no Album Artist tag.
+        album_artist = (entry.get_string(RB.RhythmDBPropType.ALBUM_ARTIST) or '').strip()
+        # Same title with distinct Album Artist values stays separate;
+        # missing Album Artist groups all same-titled tracks together.
+        key = (album_artist.casefold(), album.casefold())
         grouped[key].append(entry)
     for key, tracks in grouped.items():
         tracks.sort(key=lambda e: (
@@ -50,6 +52,8 @@ class ContinuousAlbumShuffle(GObject.Object, Peas.Activatable):
         self.active = False
         self.button = None
         self.button_container = None
+        self.button_wrapper = None
+        self.button_fallback_row = None
         self.last_source = None
         self.pending_follow_id = None
 
@@ -79,52 +83,210 @@ class ContinuousAlbumShuffle(GObject.Object, Peas.Activatable):
             self.app.remove_action('album-shuffle-start')
         self.action = None
 
+    def _find_shuffle_button(self, widget):
+        """Look for Rhythmbox's actual GTK shuffle control, not a position."""
+        try:
+            if isinstance(widget, Gtk.Button):
+                action_name = widget.get_action_name() if isinstance(widget, Gtk.Actionable) else None
+                tooltip = (widget.get_tooltip_text() or '').lower()
+                widget_name = (widget.get_name() or '').lower()
+                # GTK may expose the GAction name, a tooltip or a widget name.
+                if action_name in ('app.play-shuffle', 'app.play-shuffle(true)', 'app.play-shuffle(false)'):
+                    return widget
+                if 'shuffle' in tooltip or 'shuffle' in widget_name:
+                    return widget
+            if isinstance(widget, Gtk.Container):
+                for child in widget.get_children():
+                    found = self._find_shuffle_button(child)
+                    if found is not None:
+                        return found
+        except Exception:
+            LOG.exception('Album Shuffle: inspecting GTK control hierarchy')
+        return None
+
+    def _shuffle_icon_size(self, shuffle_button):
+        """Derive icon size from the actual Rhythmbox Shuffle image."""
+        def find_image(widget):
+            if isinstance(widget, Gtk.Image):
+                return widget
+            if isinstance(widget, Gtk.Container):
+                for child in widget.get_children():
+                    result = find_image(child)
+                    if result is not None:
+                        return result
+            return None
+
+        icon = find_image(shuffle_button) if shuffle_button is not None else None
+        if icon is not None:
+            pixels = icon.get_pixel_size()
+            if pixels > 0:
+                return pixels
+            # Resolved size of a named Gtk.IconSize (not the button's padding).
+            try:
+                ok, width, height = Gtk.icon_size_lookup(icon.get_icon_size())
+                if ok and width > 0:
+                    return width
+            except Exception:
+                pass
+            width = icon.get_allocated_width()
+            if width > 1:
+                return width
+        return 20
+
+    def _draw_cd_overlay(self, area, cr):
+        """A clear concentric-ring CD replacing the lower-right arrowhead."""
+        import math
+        alloc = area.get_allocation()
+        size = min(alloc.width, alloc.height)
+        if size <= 1:
+            return False
+        fg = area.get_style_context().get_color(Gtk.StateFlags.NORMAL)
+        # GTK sometimes returns transparent/black widget backgrounds. Derive
+        # a contrasting light/dark face from the theme text color instead.
+        lum = 0.2126 * fg.red + 0.7152 * fg.green + 0.0722 * fg.blue
+        dark = (fg.red, fg.green, fg.blue)
+        light = (0.96, 0.96, 0.96) if lum < 0.5 else (0.08, 0.08, 0.08)
+        # Nudge the disc slightly left so its right edge stays round
+        # instead of being clipped by the overlay allocation.
+        cx, cy, radius = size * 0.71, size * 0.78, size * 0.285
+        # Opaque knockout and disc body hide the original lower arrowhead.
+        cr.set_source_rgb(*light)
+        cr.arc(cx, cy, radius + size * 0.055, 0, 2 * math.pi)
+        cr.fill()
+        cr.set_source_rgb(*dark)
+        cr.arc(cx, cy, radius, 0, 2 * math.pi)
+        cr.fill()
+        # Broad, high contrast ring, followed by an unmistakable dark hub.
+        cr.set_source_rgb(*light)
+        cr.arc(cx, cy, radius * 0.52, 0, 2 * math.pi)
+        cr.fill()
+        cr.set_source_rgb(*dark)
+        cr.arc(cx, cy, radius * 0.21, 0, 2 * math.pi)
+        cr.fill()
+        return False
+
+    def _draw_combined_icon(self, area, cr, icon_size):
+        """Paint both theme shuffle icon and CD on one non-windowed widget."""
+        import os
+        theme = Gtk.IconTheme.get_default()
+        pixbuf = None
+        for name in ('media-playlist-shuffle-symbolic', 'media-playlist-shuffle'):
+            if not theme.has_icon(name):
+                continue
+            try:
+                pixbuf = theme.load_icon(name, icon_size, Gtk.IconLookupFlags.FORCE_SIZE)
+                break
+            except GLib.Error:
+                continue
+        if pixbuf is None:
+            try:
+                pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(
+                    os.path.join(os.path.dirname(__file__), 'album-shuffle.svg'),
+                    icon_size, icon_size, True)
+            except GLib.Error:
+                return False
+        alloc = area.get_allocation()
+        x = max(0, (alloc.width - pixbuf.get_width()) / 2)
+        y = max(0, (alloc.height - pixbuf.get_height()) / 2)
+        Gdk.cairo_set_source_pixbuf(cr, pixbuf, x, y)
+        cr.paint()
+        self._draw_cd_overlay(area, cr)
+        return False
+
+    def _make_icon_button(self, shuffle_button=None):
+        button = Gtk.Button()
+        button.set_relief(Gtk.ReliefStyle.NONE)
+        button.set_tooltip_text('Shuffle Albums — start a fresh random album sequence')
+        icon_size = self._shuffle_icon_size(shuffle_button)
+        canvas = Gtk.DrawingArea()
+        canvas.set_size_request(icon_size, icon_size)
+        canvas.connect('draw', self._draw_combined_icon, icon_size)
+        canvas.connect('style-updated', lambda widget: widget.queue_draw())
+        Gtk.IconTheme.get_default().connect('changed',
+                lambda theme: canvas.queue_draw())
+        button.add(canvas)
+        button.connect('clicked', self.on_start)
+        return button
+
     def _install_button(self):
-        """Prefer a persistent one-click button in the main window titlebar."""
+        """Insert beside Shuffle when its GTK container is available.
+
+        Otherwise use a small icon button in the original upper row; never
+        relocate, remove, or alter the existing playback control itself.
+        """
         try:
             window = self.object.props.window
-            button = Gtk.Button.new_with_label('Shuffle Albums')
-            button.set_tooltip_text('Shuffle albums in the currently displayed filtered selection')
-            button.connect('clicked', self.on_start)
+            shuffle_button = self._find_shuffle_button(window)
+            button = self._make_icon_button(shuffle_button)
+            if shuffle_button is not None:
+                parent = shuffle_button.get_parent()
+                if isinstance(parent, Gtk.Box):
+                    children = parent.get_children()
+                    position = children.index(shuffle_button) + 1
+                    parent.pack_start(button, False, False, 0)
+                    parent.reorder_child(button, position)
+                    self.button_container = parent
+                    self.button = button
+                    button.show_all()
+                    LOG.warning('Album Shuffle: inserted immediately after Shuffle')
+                    return
+                if isinstance(parent, Gtk.Toolbar) and isinstance(shuffle_button, Gtk.ToolItem):
+                    item = Gtk.ToolItem()
+                    item.add(button)
+                    parent.insert(item, parent.get_item_index(shuffle_button) + 1)
+                    self.button_container = parent
+                    self.button_wrapper = item
+                    self.button = button
+                    item.show_all()
+                    LOG.warning('Album Shuffle: inserted GTK tool item after Shuffle')
+                    return
+                LOG.warning('Album Shuffle: shuffle control has unsupported parent %s', type(parent).__name__)
+            else:
+                LOG.warning('Album Shuffle: shuffle control not located; using fallback')
             titlebar = window.get_titlebar()
             if isinstance(titlebar, Gtk.HeaderBar):
                 titlebar.pack_end(button)
                 self.button_container = titlebar
             else:
-                # Some Rhythmbox themes/layouts have no GtkHeaderBar.  Use
-                # a compact row in the existing main GtkBox when possible.
                 child = window.get_child()
-                if isinstance(child, Gtk.Box):
-                    row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-                    row.set_margin_start(8)
-                    row.set_margin_end(8)
-                    row.pack_end(button, False, False, 0)
-                    child.pack_start(row, False, False, 0)
-                    child.reorder_child(row, 0)
-                    self.button_container = row
-                else:
-                    LOG.warning('Album Shuffle: cannot add button to this window layout; use Tools menu')
+                if not isinstance(child, Gtk.Box):
                     button.destroy()
+                    LOG.warning('Album Shuffle: no suitable fallback location; Tools menu remains available')
                     return
-            button.show_all()
+                row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+                row.set_margin_start(8)
+                row.set_margin_end(8)
+                row.pack_end(button, False, False, 0)
+                child.pack_start(row, False, False, 0)
+                child.reorder_child(row, 0)
+                self.button_container = row
+                self.button_fallback_row = row
             self.button = button
+            button.show_all()
             if self.button_container is not titlebar:
                 self.button_container.show_all()
         except Exception:
-            LOG.exception('Album Shuffle: unable to attach interface button; Tools menu remains available')
+            LOG.exception('Album Shuffle: unable to attach button; Tools menu still available')
 
     def _remove_button(self):
-        if self.button is not None:
-            try:
-                container = self.button_container
-                if isinstance(container, Gtk.HeaderBar):
-                    container.remove(self.button)
-                elif container is not None:
-                    container.destroy()
-            except Exception:
-                LOG.exception('Album Shuffle: removing button')
-            self.button = None
-            self.button_container = None
+        if self.button is None:
+            return
+        try:
+            if self.button_wrapper is not None:
+                self.button_wrapper.destroy()
+            elif self.button_container is not None:
+                parent = self.button.get_parent()
+                if parent is not None:
+                    parent.remove(self.button)
+                # Only delete fallback rows created by the plugin.
+                if getattr(self, 'button_fallback_row', None) is not None:
+                    self.button_fallback_row.destroy()
+                    self.button_fallback_row = None
+        except Exception:
+            LOG.exception('Album Shuffle: removing button')
+        self.button = None
+        self.button_container = None
+        self.button_wrapper = None
 
     def _current_filtered_source(self):
         page = self.object.props.selected_page
