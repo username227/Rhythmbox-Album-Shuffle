@@ -195,7 +195,12 @@ class ContinuousAlbumShuffle(GObject.Object, Peas.Activatable):
 
     def _make_icon_button(self, shuffle_button=None):
         button = Gtk.Button()
-        button.set_relief(Gtk.ReliefStyle.NONE)
+        if isinstance(shuffle_button, Gtk.Button):
+            button.set_relief(shuffle_button.get_relief())
+        # GTK does not automatically recognize DrawingArea as an icon-only button.
+        button.get_style_context().add_class('image-button')
+        if isinstance(shuffle_button, Gtk.Button) and shuffle_button.get_style_context().has_class('raised'):
+            button.get_style_context().add_class('raised')
         button.set_tooltip_text('Shuffle Albums — start a fresh random album sequence')
         icon_size = self._shuffle_icon_size(shuffle_button)
         canvas = Gtk.DrawingArea()
