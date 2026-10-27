@@ -3,6 +3,8 @@ import logging
 import random
 from collections import defaultdict, deque
 
+import cairo
+
 from gi.repository import GObject, Gio, GLib, Gtk, Gdk, GdkPixbuf, Peas, RB
 
 LOG = logging.getLogger('rhythmbox-album-shuffle')
@@ -140,26 +142,22 @@ class ContinuousAlbumShuffle(GObject.Object, Peas.Activatable):
         size = min(alloc.width, alloc.height)
         if size <= 1:
             return False
-        fg = area.get_style_context().get_color(Gtk.StateFlags.NORMAL)
-        # GTK sometimes returns transparent/black widget backgrounds. Derive
-        # a contrasting light/dark face from the theme text color instead.
-        lum = 0.2126 * fg.red + 0.7152 * fg.green + 0.0722 * fg.blue
+        fg = area.get_style_context().get_color(area.get_style_context().get_state())
         dark = (fg.red, fg.green, fg.blue)
-        light = (0.96, 0.96, 0.96) if lum < 0.5 else (0.08, 0.08, 0.08)
-        # Nudge the disc slightly left so its right edge stays round
-        # instead of being clipped by the overlay allocation.
         cx, cy, radius = size * 0.71, size * 0.78, size * 0.285
-        # Opaque knockout and disc body hide the original lower arrowhead.
-        cr.set_source_rgb(*light)
+        # Work inside the isolated icon group, not on the toolbar itself.
+        # Punch away the shuffle arrow and draw a transparent-ring disc.
+        cr.set_operator(cairo.OPERATOR_CLEAR)
         cr.arc(cx, cy, radius + size * 0.055, 0, 2 * math.pi)
         cr.fill()
+        cr.set_operator(cairo.OPERATOR_OVER)
         cr.set_source_rgb(*dark)
         cr.arc(cx, cy, radius, 0, 2 * math.pi)
         cr.fill()
-        # Broad, high contrast ring, followed by an unmistakable dark hub.
-        cr.set_source_rgb(*light)
+        cr.set_operator(cairo.OPERATOR_CLEAR)
         cr.arc(cx, cy, radius * 0.52, 0, 2 * math.pi)
         cr.fill()
+        cr.set_operator(cairo.OPERATOR_OVER)
         cr.set_source_rgb(*dark)
         cr.arc(cx, cy, radius * 0.21, 0, 2 * math.pi)
         cr.fill()
@@ -174,7 +172,10 @@ class ContinuousAlbumShuffle(GObject.Object, Peas.Activatable):
             if not theme.has_icon(name):
                 continue
             try:
-                pixbuf = theme.load_icon(name, icon_size, Gtk.IconLookupFlags.FORCE_SIZE)
+                info = theme.lookup_icon(name, icon_size, Gtk.IconLookupFlags.FORCE_SIZE)
+                if info is None:
+                    continue
+                pixbuf, _symbolic = info.load_symbolic_for_context(area.get_style_context())
                 break
             except GLib.Error:
                 continue
@@ -188,9 +189,12 @@ class ContinuousAlbumShuffle(GObject.Object, Peas.Activatable):
         alloc = area.get_allocation()
         x = max(0, (alloc.width - pixbuf.get_width()) / 2)
         y = max(0, (alloc.height - pixbuf.get_height()) / 2)
+        cr.push_group()
         Gdk.cairo_set_source_pixbuf(cr, pixbuf, x, y)
         cr.paint()
         self._draw_cd_overlay(area, cr)
+        cr.pop_group_to_source()
+        cr.paint()
         return False
 
     def _make_icon_button(self, shuffle_button=None):
@@ -207,8 +211,8 @@ class ContinuousAlbumShuffle(GObject.Object, Peas.Activatable):
         canvas.set_size_request(icon_size, icon_size)
         canvas.connect('draw', self._draw_combined_icon, icon_size)
         canvas.connect('style-updated', lambda widget: widget.queue_draw())
-        Gtk.IconTheme.get_default().connect('changed',
-                lambda theme: canvas.queue_draw())
+        canvas.connect('state-flags-changed', lambda widget, old_flags: widget.queue_draw())
+        Gtk.IconTheme.get_default().connect('changed', lambda theme: canvas.queue_draw())
         button.add(canvas)
         button.connect('clicked', self.on_start)
         return button
