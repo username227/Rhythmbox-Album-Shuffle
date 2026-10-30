@@ -17,9 +17,22 @@ This plugin adds an option for Continuous Album Shuffle to Rhythmbox.
 Album Shuffle groups tracks into albums primarily by the Album tag. It uses the Album Artist tag to distinguish albums that share the same title, as is common with names such as <i>Greatest Hits</i>. If Album Artist is not present, all tracks with the same Album value are treated as a single album, regardless of their individual Artist tags or folder locations.
 
 # Installation
-Install the albumshuffle folder into either `/usr/lib/rhythmbox/plugins` or `~/.local/share/rhythmbox/plugins`.
-For the Flatpak version, install it into `~/.var/app/org.gnome.Rhythmbox3/data/rhythmbox/plugins`.
-In Rhythmbox, go to Preferences > Plugins and click "Continuous Album Shuffle" to activate.
+
+For a **user-level installation**, copy the plugin folder into:
+
+`~/.local/share/rhythmbox/plugins/`
+
+For a **system-wide installation**, the location depends on your distribution:
+
+- **Arch Linux:** `/usr/lib/rhythmbox/plugins/`
+- **Debian/Ubuntu/Mint (x86_64):** `/usr/lib/x86_64-linux-gnu/rhythmbox/plugins/`
+- **Debian/Ubuntu/Mint (ARM64):** `/usr/lib/aarch64-linux-gnu/rhythmbox/plugins/`
+
+For **Flatpak**, use:
+
+`~/.var/app/org.gnome.Rhythmbox3/data/rhythmbox/plugins/`
+
+Restart Rhythmbox, open **Preferences → Plugins**, and enable the plugin.
 
 # Full Disclosure
   I am not a developer and am not formally trained in computer programming. AI was used to assist in the writing of the code based on my specifications, testing, and feedback. I have tested various development versions on  Arch Linux with Rhythmbox 3.5.1. I have not tested the plugin on other distributions. Reviews and improvements to the code base, as well as additional feature requests, are welcome.
