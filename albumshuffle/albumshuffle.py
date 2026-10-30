@@ -19,11 +19,7 @@ def group_albums(entries):
         album = (entry.get_string(RB.RhythmDBPropType.ALBUM) or '').strip()
         if not album or album.lower() in ('unknown', 'unknown album'):
             continue
-        # Never fall back to the individual track artist. Compilation albums
-        # commonly contain different artists while having no Album Artist tag.
         album_artist = (entry.get_string(RB.RhythmDBPropType.ALBUM_ARTIST) or '').strip()
-        # Same title with distinct Album Artist values stays separate;
-        # missing Album Artist groups all same-titled tracks together.
         key = (album_artist.casefold(), album.casefold())
         grouped[key].append(entry)
     for key, tracks in grouped.items():
@@ -86,13 +82,11 @@ class ContinuousAlbumShuffle(GObject.Object, Peas.Activatable):
         self.action = None
 
     def _find_shuffle_button(self, widget):
-        """Look for Rhythmbox's actual GTK shuffle control, not a position."""
         try:
             if isinstance(widget, Gtk.Button):
                 action_name = widget.get_action_name() if isinstance(widget, Gtk.Actionable) else None
                 tooltip = (widget.get_tooltip_text() or '').lower()
                 widget_name = (widget.get_name() or '').lower()
-                # GTK may expose the GAction name, a tooltip or a widget name.
                 if action_name in ('app.play-shuffle', 'app.play-shuffle(true)', 'app.play-shuffle(false)'):
                     return widget
                 if 'shuffle' in tooltip or 'shuffle' in widget_name:
@@ -107,7 +101,6 @@ class ContinuousAlbumShuffle(GObject.Object, Peas.Activatable):
         return None
 
     def _shuffle_icon_size(self, shuffle_button):
-        """Derive icon size from the actual Rhythmbox Shuffle image."""
         def find_image(widget):
             if isinstance(widget, Gtk.Image):
                 return widget
@@ -123,7 +116,6 @@ class ContinuousAlbumShuffle(GObject.Object, Peas.Activatable):
             pixels = icon.get_pixel_size()
             if pixels > 0:
                 return pixels
-            # Resolved size of a named Gtk.IconSize (not the button's padding).
             try:
                 ok, width, height = Gtk.icon_size_lookup(icon.get_icon_size())
                 if ok and width > 0:
@@ -136,7 +128,6 @@ class ContinuousAlbumShuffle(GObject.Object, Peas.Activatable):
         return 20
 
     def _draw_cd_overlay(self, area, cr):
-        """A clear concentric-ring CD replacing the lower-right arrowhead."""
         import math
         alloc = area.get_allocation()
         size = min(alloc.width, alloc.height)
@@ -145,8 +136,6 @@ class ContinuousAlbumShuffle(GObject.Object, Peas.Activatable):
         fg = area.get_style_context().get_color(area.get_style_context().get_state())
         dark = (fg.red, fg.green, fg.blue)
         cx, cy, radius = size * 0.71, size * 0.78, size * 0.285
-        # Work inside the isolated icon group, not on the toolbar itself.
-        # Punch away the shuffle arrow and draw a transparent-ring disc.
         cr.set_operator(cairo.OPERATOR_CLEAR)
         cr.arc(cx, cy, radius + size * 0.055, 0, 2 * math.pi)
         cr.fill()
@@ -164,7 +153,6 @@ class ContinuousAlbumShuffle(GObject.Object, Peas.Activatable):
         return False
 
     def _draw_combined_icon(self, area, cr, icon_size):
-        """Paint both theme shuffle icon and CD on one non-windowed widget."""
         import os
         theme = Gtk.IconTheme.get_default()
         pixbuf = None
@@ -201,7 +189,6 @@ class ContinuousAlbumShuffle(GObject.Object, Peas.Activatable):
         button = Gtk.Button()
         if isinstance(shuffle_button, Gtk.Button):
             button.set_relief(shuffle_button.get_relief())
-        # GTK does not automatically recognize DrawingArea as an icon-only button.
         button.get_style_context().add_class('image-button')
         if isinstance(shuffle_button, Gtk.Button) and shuffle_button.get_style_context().has_class('raised'):
             button.get_style_context().add_class('raised')
@@ -218,11 +205,6 @@ class ContinuousAlbumShuffle(GObject.Object, Peas.Activatable):
         return button
 
     def _install_button(self):
-        """Insert beside Shuffle when its GTK container is available.
-
-        Otherwise use a small icon button in the original upper row; never
-        relocate, remove, or alter the existing playback control itself.
-        """
         try:
             window = self.object.props.window
             shuffle_button = self._find_shuffle_button(window)
@@ -287,7 +269,6 @@ class ContinuousAlbumShuffle(GObject.Object, Peas.Activatable):
                 parent = self.button.get_parent()
                 if parent is not None:
                     parent.remove(self.button)
-                # Only delete fallback rows created by the plugin.
                 if getattr(self, 'button_fallback_row', None) is not None:
                     self.button_fallback_row.destroy()
                     self.button_fallback_row = None
@@ -300,8 +281,6 @@ class ContinuousAlbumShuffle(GObject.Object, Peas.Activatable):
     def _current_filtered_source(self):
         page = self.object.props.selected_page
         if page is self.playlist and self.last_source is not None:
-            # If the user explicitly navigated to the generated playlist,
-            # reuse the last filtered source for reshuffling.
             page = self.last_source
         if page is None or not isinstance(page, RB.Source):
             return None
@@ -310,11 +289,6 @@ class ContinuousAlbumShuffle(GObject.Object, Peas.Activatable):
         return page
 
     def _get_or_create_playlist(self, manager):
-        """Reuse our generated playlist instead of creating another every run.
-
-        Resolve the saved playlist by name after a Rhythmbox restart, too.
-        Don't remove unrelated playlists or alter the music library.
-        """
         if self.playlist is not None:
             return self.playlist
         for candidate in manager.get_playlists():
@@ -326,11 +300,9 @@ class ContinuousAlbumShuffle(GObject.Object, Peas.Activatable):
         return self.playlist
 
     def _clear_generated_playlist(self, playlist):
-        """Remove entries only from the plugin's own playlist."""
         model = playlist.get_query_model()
         if model is None:
             return
-        # Snapshot first; removing entries modifies the query model.
         for entry in [row[0] for row in model]:
             playlist.remove_entry(entry)
 
@@ -341,14 +313,10 @@ class ContinuousAlbumShuffle(GObject.Object, Peas.Activatable):
             if source is None:
                 LOG.warning('Album Shuffle: select Music or a playlist first')
                 return
-            # Take the model from the actual onscreen song list.  A source's
-            # query-model may differ from the EntryView model after browser or
-            # search filtering, depending on Rhythmbox's source implementation.
             entry_view = source.get_entry_view()
             model = entry_view.props.model if entry_view is not None else None
             if model is None:
-                LOG.warning('Album Shuffle: no visible song list for source %s',
-                            source.props.name)
+                LOG.warning('Album Shuffle: no visible song list for source %s', source.props.name)
                 return
             entries = [row[0] for row in model]
             source_model = source.props.query_model
@@ -373,9 +341,6 @@ class ContinuousAlbumShuffle(GObject.Object, Peas.Activatable):
             self.scheduled_count = 0
             self.completed_count = 0
             self.active = False
-
-            # Playback must stop before we replace tracks in the playlist
-            # that might currently be feeding the player.
             self.player.set_playback_state(False, False)
             manager = shell.props.playlist_manager
             self.playlist = self._get_or_create_playlist(manager)
@@ -391,13 +356,8 @@ class ContinuousAlbumShuffle(GObject.Object, Peas.Activatable):
             if first_entry is None:
                 return
             self.player.set_playback_state(False, False)
-            # Keep the selected Music/genre/artist view unchanged.
-            # play_entry accepts an independent source for playback.
             self.active = True
             self.player.play_entry(first_entry, self.playlist)
-            # Creating a playlist can change the selected display page.
-            # Restore the Music browser AFTER starting playback, leaving the
-            # generated playlist as the playing source.
             GLib.idle_add(self._restore_browser_view, source, first_entry)
             LOG.warning('Album Shuffle: %d albums from current filter, %d tracks; first album: %s',
                         len(keys), len(entries), first_entry.get_string(RB.RhythmDBPropType.ALBUM))
@@ -435,7 +395,6 @@ class ContinuousAlbumShuffle(GObject.Object, Peas.Activatable):
         return tracks[0]
 
     def _queue_follow(self, entry):
-        """Schedule scrolling after the entry view has finished updating."""
         if self.pending_follow_id is not None:
             GLib.source_remove(self.pending_follow_id)
             self.pending_follow_id = None
@@ -444,13 +403,13 @@ class ContinuousAlbumShuffle(GObject.Object, Peas.Activatable):
     def _follow_entry(self, entry):
         self.pending_follow_id = None
         try:
-            source = self.last_source
-            # Do not interfere if the user is viewing another source.
-            if not self.active or source is None or self.object.props.selected_page is not source:
+            # Preserve the original follow behavior for the filtered Music view,
+            # but also highlight the saved song in the generated shuffle playlist.
+            source = self.object.props.selected_page
+            if not self.active or source not in (self.last_source, self.playlist):
                 return GLib.SOURCE_REMOVE
             view = source.get_entry_view()
             if view is None or not view.get_entry_contained(entry):
-                # User may have changed the filter while playback continues.
                 return GLib.SOURCE_REMOVE
             view.select_none()
             view.select_entry(entry)
@@ -470,13 +429,8 @@ class ContinuousAlbumShuffle(GObject.Object, Peas.Activatable):
             uri = entry.get_string(RB.RhythmDBPropType.LOCATION)
             if uri not in self.album_ends:
                 return
-            # When the last track of an album starts, add another album.
-            # This keeps playback continuous without handling end-of-stream
-            # ourselves or skipping the first track of the next album.
             self.album_ends.discard(uri)
             self.completed_count += 1
-            # Do not begin a new cycle until all previously scheduled
-            # albums have actually finished, even if the deck is empty.
             if not self.deck and self.completed_count < self.scheduled_count:
                 return
             self.replenishing = True
@@ -493,3 +447,308 @@ class ContinuousAlbumShuffle(GObject.Object, Peas.Activatable):
         finally:
             self.replenishing = False
         return GLib.SOURCE_REMOVE
+
+
+# === Rhythmbox persistent shuffle session integration (v1) ===
+
+# This file's session extension is embedded, so this shuffle plugin remains
+# independently installable with or without Session Restore.
+import json as _ss_json
+import os as _ss_os
+import tempfile as _ss_tempfile
+import time as _ss_time
+import uuid as _ss_uuid
+from pathlib import Path as _SSPath
+
+
+def _ss_root():
+    return _SSPath(_ss_os.environ.get('XDG_STATE_HOME',
+                    _ss_os.path.expanduser('~/.local/state'))) / 'rhythmbox-shuffle-state'
+
+
+def _ss_atomic(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    name = None
+    try:
+        with _ss_tempfile.NamedTemporaryFile('w', encoding='utf-8', dir=str(path.parent),
+                                             prefix='.' + path.name + '.', delete=False) as fp:
+            name = fp.name
+            _ss_json.dump(data, fp, ensure_ascii=False, separators=(',', ':'))
+            fp.write('\n')
+            fp.flush()
+            _ss_os.fsync(fp.fileno())
+        _ss_os.replace(name, path)
+    finally:
+        if name and _ss_os.path.exists(name):
+            _ss_os.unlink(name)
+
+
+def _ss_read(path):
+    try:
+        with path.open(encoding='utf-8') as fp:
+            value = _ss_json.load(fp)
+        return value if isinstance(value, dict) else None
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError):
+        LOG.exception('Shuffle session: failed to read %s', path)
+        return None
+
+
+def _ss_key(key):
+    return list(key) if isinstance(key, tuple) else key
+
+
+def _ss_decode(key):
+    return tuple(key) if isinstance(key, list) else key
+
+
+def _ss_paths(mode):
+    root = _ss_root()
+    return root / (mode + '-groups.json'), root / (mode + '-progress.json'), root / (mode + '-ready.json')
+
+
+def _ss_progress(plugin, mode):
+    if getattr(plugin, '_ss_generation', None) is None:
+        return
+    try:
+        keys = list(plugin.deck)
+        ends = getattr(plugin, 'album_ends' if mode == 'album' else 'folder_ends')
+        playlist = getattr(plugin, 'playlist', None)
+        last_source = getattr(plugin, 'last_source', None)
+        state = {'version': 1, 'generation': plugin._ss_generation,
+                 'active': bool(plugin.active),
+                 'playlist': playlist.props.name if playlist else '',
+                 'source': last_source.props.name if last_source else 'Music',
+                 'deck': [_ss_key(k) for k in keys],
+                 'ends': sorted(ends),
+                 'scheduled': int(plugin.scheduled_count),
+                 'completed': int(plugin.completed_count),
+                 'timestamp': int(_ss_time.time())}
+        _ss_atomic(_ss_paths(mode)[1], state)
+    except Exception:
+        LOG.exception('%s Shuffle: unable to checkpoint progress', mode.title())
+
+
+def _ss_start(plugin, mode):
+    if getattr(plugin, '_ss_restore_timer', None) is not None:
+        try:
+            GLib.source_remove(plugin._ss_restore_timer)
+        except Exception:
+            pass
+        plugin._ss_restore_timer = None
+    plugin._ss_restored = True
+    if not plugin.active:
+        _ss_progress(plugin, mode)
+        return
+    try:
+        plugin._ss_generation = _ss_uuid.uuid4().hex
+        groups = plugin.albums if mode == 'album' else plugin.folders
+        payload = {'version': 1, 'generation': plugin._ss_generation,
+                   'groups': [{'key': _ss_key(k),
+                               'uris': [entry.get_string(RB.RhythmDBPropType.LOCATION)
+                                        for entry in entries]}
+                              for k, entries in groups.items()]}
+        _ss_atomic(_ss_paths(mode)[0], payload)
+        _ss_progress(plugin, mode)
+        _ss_ready(plugin, mode)
+    except Exception:
+        LOG.exception('%s Shuffle: failed to save initial shuffle order', mode.title())
+
+
+def _ss_ready(plugin, mode):
+    try:
+        _ss_atomic(_ss_paths(mode)[2], {'pid': _ss_os.getpid(),
+                   'generation': plugin._ss_generation, 'active': bool(plugin.active)})
+    except Exception:
+        LOG.exception('%s Shuffle: could not publish readiness', mode.title())
+
+
+def _ss_restore(plugin, mode):
+    if getattr(plugin, '_ss_restored', False):
+        plugin._ss_restore_timer = None
+        return GLib.SOURCE_REMOVE
+    manifest = _ss_read(_ss_paths(mode)[0])
+    progress = _ss_read(_ss_paths(mode)[1])
+    if manifest is None or progress is None or not progress.get('active'):
+        plugin._ss_restored = True
+        plugin._ss_restore_timer = None
+        return GLib.SOURCE_REMOVE
+    if manifest.get('generation') != progress.get('generation'):
+        LOG.warning('%s Shuffle: inconsistent state generations; not restoring', mode.title())
+        plugin._ss_restored = True
+        plugin._ss_restore_timer = None
+        return GLib.SOURCE_REMOVE
+    if _ss_time.monotonic() > plugin._ss_deadline:
+        LOG.warning('%s Shuffle: library not ready; session state remains on disk', mode.title())
+        plugin._ss_restored = True
+        plugin._ss_restore_timer = None
+        return GLib.SOURCE_REMOVE
+    try:
+        target = None
+        for playlist in plugin.object.props.playlist_manager.get_playlists():
+            if playlist.props.name == progress.get('playlist'):
+                target = playlist
+                break
+        if target is None or target.get_query_model() is None:
+            return GLib.SOURCE_CONTINUE
+        database = plugin.object.props.db
+        groups = {}
+        for group in manifest['groups']:
+            key = _ss_decode(group['key'])
+            entries = []
+            for uri in group['uris']:
+                entry = database.entry_lookup_by_location(uri)
+                if entry is None:
+                    return GLib.SOURCE_CONTINUE  # NAS or DB still loading
+                entries.append(entry)
+            if entries:
+                groups[key] = entries
+        if not groups:
+            return GLib.SOURCE_CONTINUE
+        # Avoid restoring stale progress over a newer shuffle started by user.
+        if getattr(plugin, '_ss_restored', False):
+            return GLib.SOURCE_REMOVE
+        plugin.playlist = target
+        if mode == 'album':
+            plugin.albums = groups
+            plugin.album_ends = set(progress.get('ends', []))
+        else:
+            plugin.folders = groups
+            plugin.folder_ends = set(progress.get('ends', []))
+        plugin.deck = deque(k for raw in progress.get('deck', [])
+                            if (k := _ss_decode(raw)) in groups)
+        plugin.scheduled_count = int(progress.get('scheduled', 0))
+        plugin.completed_count = int(progress.get('completed', 0))
+        wanted = progress.get('source') or 'Music'
+        plugin.last_source = plugin.object.props.library_source
+        for source in plugin.object.props.playlist_manager.get_playlists():
+            if source.props.name == wanted:
+                plugin.last_source = source
+                break
+        plugin.active = True
+        plugin.replenishing = False
+        plugin._ss_generation = progress['generation']
+        plugin._ss_restored = True
+        plugin._ss_restore_timer = None
+        _ss_ready(plugin, mode)
+        LOG.warning('%s Shuffle: recovered %d groups, %d pending groups, %d group ends',
+                    mode.title(), len(groups), len(plugin.deck), len(progress.get('ends', [])))
+        entry = plugin.player.get_playing_entry()
+        if entry and plugin.player.get_playing_source() == target:
+            if mode == 'album':
+                plugin._queue_follow(entry)
+            else:
+                plugin._follow_later(entry)
+        _ss_schedule_music_follow(plugin, mode)
+        return GLib.SOURCE_REMOVE
+    except Exception:
+        LOG.exception('%s Shuffle: restore attempt encountered error', mode.title())
+        return GLib.SOURCE_CONTINUE
+
+
+
+# Restore Music-window highlighting independently of shuffle-session recovery.
+# A restored playlist already receives Rhythmbox's playing-row indicator, but
+# the Music view must be explicitly selected/scrolled when it is visible.
+# This has no effect on audio, ordering, playlist membership, or state files.
+def _ss_follow_music_view(plugin, mode):
+    plugin._ss_music_follow_id = None
+    try:
+        playing_source = plugin.player.get_playing_source()
+        expected_name = 'Continuous Album Shuffle' if mode == 'album' else 'Continuous Folder Shuffle'
+        if playing_source is None or playing_source.props.name != expected_name:
+            return GLib.SOURCE_REMOVE
+        music = plugin.object.props.library_source
+        if music is None or plugin.object.props.selected_page != music:
+            return GLib.SOURCE_REMOVE
+        entry = plugin.player.get_playing_entry()
+        if entry is None:
+            return GLib.SOURCE_REMOVE
+        view = music.get_entry_view()
+        if view is not None and view.get_entry_contained(entry):
+            view.select_none()
+            view.select_entry(entry)
+            view.scroll_to_entry(entry)
+    except Exception:
+        LOG.exception('%s Shuffle: could not highlight playing song in Music', mode.title())
+    return GLib.SOURCE_REMOVE
+
+
+def _ss_schedule_music_follow(plugin, mode):
+    if getattr(plugin, '_ss_music_follow_id', None) is None:
+        plugin._ss_music_follow_id = GLib.idle_add(_ss_follow_music_view, plugin, mode)
+
+def _ss_wrap(cls, mode):
+    original_activate = cls.do_activate
+    original_deactivate = cls.do_deactivate
+    original_start = cls.on_start
+    original_song = cls.on_song_changed
+    original_append = cls._append_next_idle if mode == 'album' else cls._append_idle
+
+    def activate(self):
+        original_activate(self)
+        self._ss_restored = False
+        self._ss_generation = None
+        self._ss_deadline = _ss_time.monotonic() + 600
+        self._ss_restore_timer = GLib.timeout_add_seconds(3, _ss_restore, self, mode)
+        GLib.idle_add(lambda: (_ss_restore(self, mode), GLib.SOURCE_REMOVE)[1])
+        # Follow the playing row when the user returns to Music, too.
+        self._ss_music_follow_id = None
+        self._ss_music_page_handler = self.object.connect(
+            'notify::selected-page',
+            lambda *_args: _ss_schedule_music_follow(self, mode))
+        self._ss_music_source_handler = self.player.connect(
+            'playing-source-changed',
+            lambda *_args: _ss_schedule_music_follow(self, mode))
+        _ss_schedule_music_follow(self, mode)
+
+    def deactivate(self):
+        if getattr(self, '_ss_music_follow_id', None) is not None:
+            GLib.source_remove(self._ss_music_follow_id)
+            self._ss_music_follow_id = None
+        if getattr(self, '_ss_music_page_handler', None) is not None:
+            self.object.disconnect(self._ss_music_page_handler)
+            self._ss_music_page_handler = None
+        if getattr(self, '_ss_music_source_handler', None) is not None:
+            self.player.disconnect(self._ss_music_source_handler)
+            self._ss_music_source_handler = None
+        _ss_progress(self, mode)  # Must occur BEFORE original sets active=False.
+        if getattr(self, '_ss_restore_timer', None) is not None:
+            try:
+                GLib.source_remove(self._ss_restore_timer)
+            except Exception:
+                pass
+            self._ss_restore_timer = None
+        try:
+            _ss_paths(mode)[2].unlink(missing_ok=True)
+        except OSError:
+            LOG.exception('%s Shuffle: unable to clear readiness file', mode.title())
+        original_deactivate(self)
+
+    def start(self, *args):
+        result = original_start(self, *args)
+        _ss_start(self, mode)
+        return result
+
+    def song_changed(self, *args):
+        result = original_song(self, *args)
+        _ss_schedule_music_follow(self, mode)
+        _ss_progress(self, mode)
+        return result
+
+    def append(self, *args):
+        result = original_append(self, *args)
+        _ss_progress(self, mode)
+        return result
+
+    cls.do_activate = activate
+    cls.do_deactivate = deactivate
+    cls.on_start = start
+    cls.on_song_changed = song_changed
+    if mode == 'album':
+        cls._append_next_idle = append
+    else:
+        cls._append_idle = append
+
+_ss_wrap(ContinuousAlbumShuffle, 'album')
