@@ -1228,6 +1228,34 @@ def _ss_ready(plugin, mode):
         LOG.exception('%s Shuffle: could not publish readiness', mode.title())
 
 
+def _ss_enable_pending_resume_button(plugin, mode):
+    """Enable Resume in an already-open dialog only after verified restoration.
+
+    The toolbar can be clicked while Rhythmbox is still loading a long saved
+    playlist. Unlike test15, do not freeze the Resume choice at click time.
+    UI errors must never abort the underlying successful session restoration.
+    """
+    try:
+        dialog = getattr(plugin, '_resume_dialog', None)
+        bookmark = getattr(plugin, '_bookmark', None)
+        if dialog is None or bookmark is None or not bookmark.valid():
+            return
+        resume_button = dialog.get_widget_for_response(Gtk.ResponseType.YES)
+        if resume_button is None:
+            return
+        resume_button.set_sensitive(True)
+        dialog.format_secondary_text(
+            'Resume returns to the bookmarked track at its saved playback time, '
+            'keeping the existing playlist order. New Shuffle replaces that '
+            'playlist using the currently selected library filters.')
+        dialog.set_default_response(Gtk.ResponseType.YES)
+        LOG.info('%s Shuffle: enabled Resume in already-open startup dialog',
+                 mode.title())
+    except Exception:
+        LOG.exception('%s Shuffle: could not update pending Resume dialog',
+                      mode.title())
+
+
 def _ss_restore(plugin, mode):
     # An explicit New Shuffle is being prepared; don't let startup recovery
     # replace its candidate deck before playback verification finishes.
@@ -1346,6 +1374,7 @@ def _ss_restore(plugin, mode):
         plugin._ss_restored = True
         plugin._ss_restore_timer = None
         _ss_ready(plugin, mode)
+        _ss_enable_pending_resume_button(plugin, mode)
         # Preserve the saved manifest and pending queue if any URI is offline.
         # The native playlist itself is never rewritten by startup recovery.
         plugin._full_playlist_expected_tracks = sum(len(g['uris']) for g in manifest['groups'])
@@ -2368,7 +2397,7 @@ def _ss_wrap(cls, mode):
         self._resume_dialog = None
         dialog.destroy()
         if response == Gtk.ResponseType.YES:
-            if self._bookmark is not None:
+            if self._bookmark is not None and self._bookmark.valid():
                 self._bookmark.resume()
         elif response == Gtk.ResponseType.NO:
             _start_fresh_shuffle(self)
@@ -2420,9 +2449,9 @@ def _ss_wrap(cls, mode):
                 'playlist using the currently selected library filters.')
         elif loading:
             dialog.format_secondary_text(
-                'A saved shuffle bookmark exists, but its playlist has not finished '
-                'loading or could not be found. You can Cancel and try later, or '
-                'explicitly replace it with a new shuffle using the current filters.')
+                'Rhythmbox is still loading this saved shuffle. Resume will become '
+                'available automatically as soon as the playlist and bookmark are '
+                'ready. You can also Cancel or explicitly start a New Shuffle.')
         else:
             dialog.format_secondary_text(
                 'The generated shuffle playlist still exists, but it has no valid '
@@ -2430,9 +2459,11 @@ def _ss_wrap(cls, mode):
                 'shuffle using the current filters.')
         dialog.add_button('Cancel', Gtk.ResponseType.CANCEL)
         dialog.add_button('New Shuffle', Gtk.ResponseType.NO)
-        if ready:
-            dialog.add_button('Resume', Gtk.ResponseType.YES)
-            dialog.set_default_response(Gtk.ResponseType.YES)
+        if ready or loading:
+            resume_button = dialog.add_button('Resume', Gtk.ResponseType.YES)
+            resume_button.set_sensitive(bool(ready))
+            if ready:
+                dialog.set_default_response(Gtk.ResponseType.YES)
         dialog.connect('response', lambda dlg, response: _dialog_response(self, dlg, response))
         self._resume_dialog = dialog
         dialog.show()
